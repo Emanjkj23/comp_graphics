@@ -1,4 +1,3 @@
-// CPP program to render 100, 000 large blue particles with motion using Shaders
 #include <GL/glew.h>
 #include <GL/freeglut.h>
 #include <iostream>
@@ -7,76 +6,49 @@
 #include <chrono>
 #include <string>
 
-// --- THE SHADERS ---
-
-// The Vertex Shader: Places the point at the center of the screen
+// --- 1. THE SHADERS (Simplified for Debugging) ---
 const char* vertexShaderSource = R"(
     #version 330 core
-    // aData holds: x, y, z (random offset from the center of the river) and w (starting point along the path from 0 to 1)
-    layout (location = 0) in vec4 aData;
-
+    layout (location = 0) in vec4 aData; 
     uniform float uTime;
-    out float vProgress;  // Send how far along the path the particle is to the fragment shader
+    out float vProgress;
 
     void main() {
-        // Calculate current position along the path (0.0 to 1.0)
-        // fract() makes it loop back to 0 when it hits 1.
-        float t = fract(aData.w + uTime * 0.05);
+        float t = fract(aData.w + uTime * 0.05); 
         vProgress = t;
 
-        // --- THE MAIN PATH ---
-        // mAP t (0 to 1) to X coordinate (-1.5 to +1.5 across the screen)
         float pathX = (t - 0.5) * 3.0;
-        
-        // Create an S-Curve / Winding River on the Y axis
         float pathY = sin(t * 10.0) * 0.4; 
-        
-        // Taper the ends so the river fades in and out smoothly
         float thickness = sin(t * 3.14159); 
 
-        // Combine the math path with the particle's random offset (the 'breeze' scatter)
         vec3 finalPos = vec3(pathX, pathY, 0.0) + (aData.xyz * 0.15 * thickness);
-
-        // Add a tiny bit of animated 'breeze' based on time
         finalPos.y += sin(uTime * 3.0 + aData.x * 20.0) * 0.02;
 
         gl_Position = vec4(finalPos, 1.0);
-        
-        // Vary particle sizes slightly for realism
-        gl_PointSize = 2.0 + (aData.z * 2.0);
+        gl_PointSize = 2.0 + (aData.z * 2.0); 
     }
 )";
 
-// The Fragment Shader: Colors the point solid blue (like the start of your image)
 const char* fragmentShaderSource = R"(
     #version 330 core
     in float vProgress;
     out vec4 FragColor;
 
     void main() {
-        // Make the point circular instead of a square
-        vec2 circCoord = 2.0 * gl_PointCoord - 1.0;
-        if (dot(circCoord, circCoord) > 1.0) {
-            discard; // Throw away corner pixels
-        }
+        // I have temporarily removed the 'discard' circular math.
+        // Some Windows drivers fail silently on gl_PointCoord.
+        // Let's ensure we can at least see the squares first!
 
-        // --- COLOR TRANSITION ---
-        vec3 startColor = vec3(0.0, 0.3, 1.0); // Deep Blue
-        vec3 endColor = vec3(1.0, 0.4, 0.0);   // Bright Orange
-
-        // Mix the colors based on how far the particle has traveled
+        vec3 startColor = vec3(0.0, 0.3, 1.0); // Blue
+        vec3 endColor = vec3(1.0, 0.4, 0.0);   // Orange
         vec3 finalColor = mix(startColor, endColor, vProgress);
 
-        // Fade out at the very beginning and very end
-        float alpha = sin(vProgress * 3.14159);
-
-        // Output color with lowered opacity so they blend smoothly
-        FragColor = vec4(finalColor, alpha * 0.5);
+        // Fixed alpha to guarantee visibility
+        FragColor = vec4(finalColor, 0.8); 
     }
 )";
 
 // --- GLOBALS ---
-// Variables for our GPU objects
 GLuint VAO, VBO, shaderProgram;
 GLint timeLocation;
 const int NUM_PARTICLES = 100000;
@@ -101,88 +73,66 @@ void checkCompileErrors(GLuint shader, std::string type) {
     }
 }
 
-// --- 3. SETUP: SHADER COMPILATION UTILITY ---
+// --- 3. SETUP ---
 void compileShaders() {
-    // Compile Vertex Shader
     GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
     glCompileShader(vertexShader);
-    checkCompileErrors(vertexShader, "VERTEX"); // <--- Checks for syntax errors
+    checkCompileErrors(vertexShader, "VERTEX"); // <--- NEW: Checks for syntax errors
 
-    // Compile Fragment Shader
     GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
     glCompileShader(fragmentShader);
-    checkCompileErrors(fragmentShader, "FRAGMENT");
+    checkCompileErrors(fragmentShader, "FRAGMENT"); // <--- NEW
 
-    // Link Shaders into a Program
     shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
     glLinkProgram(shaderProgram);
-    checkCompileErrors(shaderProgram, "PROGRAM");
+    checkCompileErrors(shaderProgram, "PROGRAM"); // <--- NEW
 
-    // Clean up individual shaders as they are now linked into the program
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
 
-    // Get the location of 'uTime' so we can update it every frame
     timeLocation = glGetUniformLocation(shaderProgram, "uTime");
 }
 
-// --- 3. DATA SETUP ---
-void setupParticle() {
+void setupParticles() {
     std::vector<float> particleData(NUM_PARTICLES * 4);
-    std::mt19937 rng(42);  // Random number generator
+    std::mt19937 rng(42); 
     std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
     std::uniform_real_distribution<float> distT(0.0f, 1.0f);
 
     for (int i = 0; i < NUM_PARTICLES * 4; i += 4) {
-        // Random offset from the center of the river (x, y, z)
-        particleData[i]     = dist(rng); // x
-        particleData[i + 1] = dist(rng); // y
-        particleData[i + 2] = dist(rng); // z
-
-        // w holds the starting 't' position on the path (0 to 1)
-        particleData[i + 3] = distT(rng);
+        particleData[i]     = dist(rng); 
+        particleData[i + 1] = dist(rng); 
+        particleData[i + 2] = dist(rng); 
+        particleData[i + 3] = distT(rng); 
     }
 
-    // Generate our GPU objects
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
 
-    // Bind the VAO first, then bind and set vertex buffers, and then configure vertex attributes.
     glBindVertexArray(VAO);
-
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, particleData.size() * sizeof(float), particleData.data(), GL_STATIC_DRAW);
 
-    // Tell OpenGL how to interpret the data (4 floats per vertex)
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-
-    // Unbind to prevent accidental modification --- SHOULD CONFIRM ABOUT THIS----
-    // glBindBuffer(GL_ARRAY_BUFFER, 0); 
-    // glBindVertexArray(0); 
 }
 
-// --- 4. THE RENDER LOOP ---
+// --- 4. THE RENDER LOOP & TIMER ---
 void display() {
-    glClearColor(0.02f, 0.02f, 0.04f, 1.0f);  // Clear the screen to a Very dark blue/black background
+    glClearColor(0.02f, 0.02f, 0.04f, 1.0f); 
     glClear(GL_COLOR_BUFFER_BIT);
 
-    // Calculate elapsed time
     auto currentTime = std::chrono::high_resolution_clock::now();
     float timeValue = std::chrono::duration<float>(currentTime - startTime).count();
 
-    // Activate our shader program
     glUseProgram(shaderProgram);
-
-    // Send the time to the GPU!
     glUniform1f(timeLocation, timeValue);
 
     glBindVertexArray(VAO);
-    // Draw all 100,000 particles at once
     glDrawArrays(GL_POINTS, 0, NUM_PARTICLES);
 
     // Swap buffers (display what we just drew)
@@ -208,11 +158,11 @@ int main(int argc, char** argv) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     // This setting allows the shader to edit the size of gl_point
-    glEnable(GL_POINT_SPRITE);  // Replaced with GL_PROGRAM_POINT_SIZE in modern OpenGL
+    glEnable(GL_PROGRAM_POINT_SIZE);
 
     // Setup our data and shaders
     compileShaders();
-    setupParticle();
+    setupParticles();
 
     // Set the display callback and start the loop
     glutDisplayFunc(display);
