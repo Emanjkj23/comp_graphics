@@ -71,7 +71,33 @@ Let's focus on the most important to start with first.
 NOTE: I hope you understand that I am looking to implement what the image I showed you looks like, but with motion. NOT the donut combined with the image. For the donut, i will do that later.
 
 # CONTINUED TODAY, TUESDAY
+## The Foundation Code (src/particle/particle.cpp)
 **Description:** winding, flowing, color-changing river of light
-To build something that looks like a professional simulation, we have to start at the absolute foundation. You cannot build a massive particle system without first mastering the **Modern OpenGL Pipeline**. In older versions of OpenGL, you could just tell the CPU to draw a point on the screen. To get the performance needed for hundreds of thousands of flowing particles, we have to push that work to the GPU.
+- To build something that looks like a professional simulation, we have to start at the absolute foundation. You cannot build a massive particle system without first mastering the **Modern OpenGL Pipeline**. In older versions of OpenGL, you could just tell the CPU to draw a point on the screen. To get the performance needed for hundreds of thousands of flowing particles, we have to push that work to the GPU.
 
-The most important first step is proving we can send a single piece of data to the GPU and write a custom program to color it. If we can draw one blue point using modern methods, we can easily scale that to 100,000.
+- The most important first step is proving we can send a single piece of data to the GPU and write a custom program to color it. If we can draw one blue point using modern methods, we can easily scale that to 100,000.
+
+Here are the core components you need to understand:
+
+1. **Shaders**: Tiny programs written in GLSL (OpenGL Shading Language) that run directly on your graphics card.
+
+    - **Vertex Shader**: Calculates where the particle is on the screen.
+
+    - **Fragment Shader**: Calculates what color the particle is.
+
+2. **VBO (Vertex Buffer Object)**: A chunk of memory we reserve on the GPU to hold our particle data (like x, y, z coordinates).
+
+3. **VAO (Vertex Array Object)**: A configuration object that tells the GPU exactly how to read the data inside the VBO.
+
+- Here is the minimal, modern OpenGL boilerplate to draw a single, large blue particle. This is the foundation upon which the entire river simulation will be built.
+
+## Drwaing the rest of the particles
+- Once you establish the pipeline (the VBO, VAO, and Shaders), you simply change the size of the data array. The GPU is designed to process thousands of calculations simultaneously in parallel. Instead of the CPU looping 100,000 times, the CPU sends the data once, and the GPU draws all 100,000 particles at the exact same time.
+
+- To achieve the flowing, color-changing river, we are going to make three major upgrades:
+
+1. **Data Generation**: We will generate 100,000 particles with random offsets and starting positions.
+
+2. **GPU Animation**: We will pass a "Time" variable to the Vertex Shader. The shader will calculate the winding math and move the particles along the path automatically.
+
+3. **Additive Blending**: We will tell OpenGL to add the colors of overlapping particles together, creating a bright, fake "glow" effect natively.
