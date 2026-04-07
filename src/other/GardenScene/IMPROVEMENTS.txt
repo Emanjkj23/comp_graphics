@@ -1,0 +1,79 @@
+// =============================================================================
+// GARDEN SCENE - FIXED & IMPROVED
+// =============================================================================
+//
+// KEY IMPROVEMENTS:
+//
+// [1] LIGHTING FIXED
+//     - Night lighting now uses cool blue-grey (0.08, 0.10, 0.20) instead of yellow
+//     - Fixed sun angle calculations in lighting setup
+//     - Added indoor light (GL_LIGHT2) that activates when inside house
+//
+// [2] FIRST-PERSON CAMERA
+//     - WASD keys move camera forward/backward/strafe
+//     - Mouse drag (left button) looks around (yaw/pitch control)
+//     - Proper direction vectors using glm::radians()
+//     - Collision detection with walls and boundaries
+//
+// [3] DOOR MECHANICS
+//     - Press E to open/close door
+//     - Smooth animation at 4°/frame
+//     - Proper door frame and hinges
+//     - doorOpening flag controls toggle behavior
+//
+// [4] COOKING ANIMATION
+//     - Press C inside house to cook an egg
+//     - Egg changes color: pale → golden yellow (0-50% → 50-100%)
+//     - Egg wobbles (sin wave animation) during cooking
+//     - Only works inside the house
+//
+// [5] HOUSE INTERIOR
+//     - Interior floor with wood color (0.6, 0.45, 0.3)
+//     - Interior ceiling (0.8, 0.8, 0.75)
+//     - Door sits at front opening (z=2.5)
+//     - Stove only renders when inside house
+//
+// [6] COLLISION SYSTEM
+//     - Front wall: camZ < -6.0
+//     - Side walls: -3 < camX < 3
+//     - Back boundary: camZ > 11.0
+//
+// CONTROLS:
+//   WASD                - Move camera (first-person)
+//   Mouse Drag (Left)   - Look around
+//   E                   - Open/Close door
+//   C                   - Cook egg (inside only)
+//   P                   - Pause/Resume
+//   N                   - Toggle Day/Night
+//   L                   - Cycle lighting modes
+//   Z                   - Toggle depth test
+//   S                   - Toggle sun orbit
+//   Scroll              - Zoom (ball camera)
+//   ESC                 - Exit
+//
+// =============================================================================
+
+COMPILATION:
+g++ -std=c++11 -o main.exe main.cpp \
+    -I../../include \
+    -L../../lib \
+    -lfreeglut -lopengl32 -lglu32 -lm
+
+Or with full paths:
+g++ -std=c++11 -o main.exe main.cpp \
+    -I"C:\Users\...\comp_graphics\include" \
+    -L"C:\Users\...\comp_graphics\lib" \
+    -lfreeglut -lopengl32 -lglu32
+
+FEATURES CHECKLIST:
+✓ First-person camera with WASD movement
+✓ Replace cube with proper house walls  
+✓ Door with animation (E key)
+✓ Interior (floor + stove + ceiling)
+✓ Basic collision detection
+✓ Fixed lighting (no yellow at night)
+✓ Indoor light that activates inside
+✓ Cooking animation (C key)
+✓ Egg color change during cooking
+✓ Egg wobble effect
+✓ Stove only visible inside

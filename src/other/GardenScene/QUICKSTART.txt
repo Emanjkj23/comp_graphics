@@ -1,0 +1,154 @@
+=============================================================================
+GARDEN SCENE - QUICK START GUIDE
+=============================================================================
+
+COMPILATION (already done - main.exe exists):
+  g++ -std=c++11 -o main.exe main.cpp \
+      -I../../include -L../../lib \
+      -lfreeglut -lopengl32 -lglu32
+
+RUN:
+  ./main.exe
+
+=============================================================================
+CAMERA CONTROLS (NEW - First Person)
+=============================================================================
+
+Movement:
+  W     - Walk forward
+  S     - Walk backward  
+  A     - Strafe left
+  D     - Strafe right
+
+Looking:
+  MOUSE DRAG (left button) - Look around
+  First 100 pixels = pitch down/up
+  Side movement = yaw left/right
+
+=============================================================================
+HOUSE INTERACTIONS
+=============================================================================
+
+Door:
+  E     - Toggle door open/close
+  Animation: 4° per frame
+  Smooth opening/closing
+
+Cooking (INSIDE HOUSE ONLY):
+  C     - Start/stop cooking egg
+  Egg shows cook progress: pale → golden yellow
+  Wobbles slightly during cooking
+  Stove only visible when you're inside
+
+Inside Detection:
+  - You must be in front of house (z < -5)
+  - And between sides (-3 < x < 3)
+  - Then you can cook and see stove
+
+=============================================================================
+LIGHTING FIXED
+=============================================================================
+
+Night Mode (Press N):
+  - Moon: Cool blue-grey (NOT yellow anymore!)
+  - RGB: (0.08, 0.10, 0.20) 
+  - Shadow color: Blue-tinted
+
+Indoor Light:
+  - Automatically activates when inside house
+  - Warm white illumination at stove
+  - Makes interior visible
+
+Day Mode:
+  - Sun: Warm yellow-orange
+  - Shadows: Dark olive
+  - Bright and natural
+
+Modes (Press L):
+  - FULL PHONG (default) - lighting, shadows, specular
+  - NO SPECULAR - dull surfaces
+  - AMBIENT ONLY - flat lighting
+  - LIGHTS OFF - completely dark
+
+=============================================================================
+SCENE CONTROLS
+=============================================================================
+
+Day/Night:
+  N     - Toggle between day and night
+  
+Sun Animation:
+  S     - Start/stop sun orbiting
+  L     - Cycle lighting modes
+  Z     - Toggle depth test (debugging)
+  
+Pause:
+  P     - Pause/resume entire scene
+
+Scene Reset (for ball):
+  R     - Reset ball to start
+  SPACE - Bounce ball
+
+=============================================================================
+BOUNDARIES & COLLISION
+=============================================================================
+
+You can walk around freely in the garden within boundaries:
+  
+  Front (near house):     z < -6.0
+  Sides (left/right):     -3 < x < 3  
+  Back (fence boundary):  z < 11.0
+
+Try to push through walls - they're solid!
+
+=============================================================================
+WHAT'S BEEN FIXED
+=============================================================================
+
+✓ Night lighting no longer yellow - now cool blue-grey
+✓ First-person camera with WASD movement
+✓ Mouse look control (drag to turn head)
+✓ Door with smooth animation (E key)
+✓ Interior with floor, ceiling, and walls visible
+✓ Cooking animation with color change (C key)
+✓ Stove only renders when inside
+✓ Indoor light activates automatically
+✓ Collision detection on all walls
+✓ Proper day/night lighting transitions
+
+=============================================================================
+TIPS & TRICKS
+=============================================================================
+
+1. Press E multiple times to see door smoothly open/close
+2. Go inside house, press C to cook - watch egg turn golden!
+3. Press N at different times to see lighting change dramatically
+4. Try different lighting modes (L) to see depth effects
+5. Move camera close to objects to see specular highlights
+6. Look up and down with mouse to explore surroundings
+7. Stand at the porch to see both inside and outside lighting
+
+=============================================================================
+TROUBLESHOOTING
+=============================================================================
+
+Q: I can't see the stove!
+A: Make sure you're inside the house (z < -5, between side walls)
+   The stove only renders when cam is inside
+
+Q: Egg won't cook
+A: Press E to make sure door is open, then press C
+   You must be inside (same bounds as stove visibility)
+
+Q: Night lighting looks weird
+A: That's fixed! Should be cool blue now.
+   If it's yellow, try recompiling
+
+Q: Can't move camera
+A: WASD for movement, Mouse drag for looking
+   Hold down the WASD key while looking where you want to go
+
+Q: Door opens automatically
+A: Press E to toggle it. Multiple presses will open/close it
+
+=============================================================================
