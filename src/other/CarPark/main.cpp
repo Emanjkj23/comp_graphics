@@ -67,9 +67,10 @@ LightMode lightMode = LM_FULL;
 DepthMode depthMode = DM_ON;
 CamMode   camMode   = CM_OVERVIEW;
 
-bool nightMode   = false;
-bool paused      = false;
-bool sunOrbiting = true;
+bool nightMode        = false;
+bool paused           = false;
+bool sunOrbiting      = true;
+bool collisionBlocked = false;  // true this frame when selected car hit an obstacle
 
 float sunAngle   = 60.f;   // degrees around Y axis
 float sunHeight  = 0.75f;  // 0=horizon,1=zenith
@@ -188,6 +189,28 @@ void setupLights()
     glLightf (GL_LIGHT1,GL_CONSTANT_ATTENUATION, .5f);
     glLightf (GL_LIGHT1,GL_LINEAR_ATTENUATION,   .08f);
     glLightf (GL_LIGHT1,GL_QUADRATIC_ATTENUATION,.015f);
+
+    // Building window glow lights (GL_LIGHT2/3/4) — three floor rows.
+    // Active in night mode: warm yellow spill illuminates ground and
+    // approaching cars. Placed just in front of the facade (z=-12.5).
+    // In day mode they are dimmed to near-zero so they have no effect.
+    float wR=nightMode?.95f:.01f, wG=nightMode?.85f:.01f, wB=nightMode?.40f:.01f;
+    GLfloat wA[]={0,0,0,1};
+    GLfloat wSp[]={wR*.3f,wG*.3f,wB*.1f,1};
+    GLenum wLights[]={GL_LIGHT2,GL_LIGHT3,GL_LIGHT4};
+    float  wHeights[]={2.f, 5.f, 8.f};  // floor 0,1,2 window Y centres (world)
+    for(int fl=0;fl<3;fl++){
+        GLfloat wPos[]={0.f, wHeights[fl], -12.5f, 1.f}; // just in front of glass
+        GLfloat wD[]={wR,wG,wB,1};
+        glEnable(wLights[fl]);
+        glLightfv(wLights[fl],GL_POSITION, wPos);
+        glLightfv(wLights[fl],GL_DIFFUSE,  wD);
+        glLightfv(wLights[fl],GL_AMBIENT,  wA);
+        glLightfv(wLights[fl],GL_SPECULAR, wSp);
+        glLightf (wLights[fl],GL_CONSTANT_ATTENUATION,  1.0f);
+        glLightf (wLights[fl],GL_LINEAR_ATTENUATION,    0.10f);
+        glLightf (wLights[fl],GL_QUADRATIC_ATTENUATION, 0.02f);
+    }
 }
 
 // ============================================================
@@ -237,7 +260,9 @@ void drawCarGeom(float cr,float cg,float cb, float wheelRot)
     float wp[4][2]={{-1.08f,-1.5f},{1.08f,-1.5f},{-1.08f,1.5f},{1.08f,1.5f}};
     for(int w=0;w<4;w++){
         glPushMatrix();
-        glTranslatef(wp[w][0],-.30f,wp[w][1]);
+        // Wheel centre must be at y=0.36 in world space (tyre outer radius=0.36).
+        // Car body is translated up by 0.38, so local offset = 0.36-0.38 = -0.02.
+        glTranslatef(wp[w][0],-.02f,wp[w][1]);
         glRotatef(wheelRot,1,0,0);
         // Tyre
         safemat(.12f,.12f,.12f,.08f,.08f,.08f,5.f);
@@ -259,10 +284,11 @@ void drawCar(int idx)
     glPushMatrix();
     glTranslatef(c.x,.38f,c.z);
     glRotatef(-c.heading,0,1,0);
-    // Selection indicator (yellow ring under selected car)
+    // Selection indicator: yellow = free, red = collision blocked
     if(idx==selectedCar && !inShadowPass){
         glDisable(GL_LIGHTING);
-        glColor3f(1.f,1.f,.0f);
+        if(collisionBlocked) glColor3f(1.f,.15f,.15f);   // red flash
+        else                 glColor3f(1.f,1.f, .0f);   // yellow normal
         glPushMatrix(); glTranslatef(0,-.36f,0); glRotatef(90,1,0,0);
         glutWireTorus(.05f,1.3f,8,20); glPopMatrix();
         if(lightMode!=LM_OFF) glEnable(GL_LIGHTING);
@@ -873,6 +899,72 @@ void display()
 }
 
 // ============================================================
+// BASIC COLLISION DETECTION
+// The selected car is modelled as a circle (radius CAR_R) on the
+// XZ plane.  We test it against:
+//   - Office building  : AABB (axis-aligned rectangle)
+//   - Trees            : circle vs circle
+//   - Other 3 cars     : circle vs circle
+//   - Bins / benches / lamp posts : circle vs circle
+// ============================================================
+static const float CAR_R = 2.6f;  // car footprint radius (half-diagonal of body)
+
+// True if circle (cx,cz,r) overlaps the rectangle [x0..x1] x [z0..z1]
+bool circleAABB(float cx,float cz,float r,
+                float x0,float x1,float z0,float z1)
+{
+    float nx=CLAMP(cx,x0,x1), nz=CLAMP(cz,z0,z1);
+    float dx=cx-nx, dz=cz-nz;
+    return (dx*dx+dz*dz) < r*r;
+}
+
+// True if two circles on the XZ plane overlap
+bool circleCircle(float ax,float az,float ar,
+                  float bx,float bz,float br)
+{
+    float dx=ax-bx, dz=az-bz, d=ar+br;
+    return (dx*dx+dz*dz) < d*d;
+}
+
+// Returns true if placing the selected car at (cx,cz) would cause a collision
+bool checkCollision(float cx,float cz)
+{
+    // --- Office building --------------------------------------------------
+    // Building parent translated to z=-16; concrete body scale 18x11x6
+    // World footprint: X[-9..9], Z[-19..-13]  (add tiny pad for car bumper)
+    if(circleAABB(cx,cz,CAR_R, -9.f,9.f, -19.f,-12.5f)) return true;
+
+    // --- Trees (8 positions, foliage radius ~1.6) --------------------------
+    const float txs[]={-17.f,-17.f,-17.f, 17.f, 17.f, 17.f,-17.f,17.f};
+    const float tzs[]={-10.f,  0.f, 10.f,-10.f,  0.f, 10.f, -4.f,-4.f};
+    for(int t=0;t<8;t++)
+        if(circleCircle(cx,cz,CAR_R, txs[t],tzs[t], 1.6f)) return true;
+
+    // --- Other (non-selected) cars ----------------------------------------
+    for(int i=0;i<4;i++){
+        if(i==selectedCar) continue;
+        if(circleCircle(cx,cz,CAR_R, cars[i].x,cars[i].z, CAR_R)) return true;
+    }
+
+    // --- Waste bins -------------------------------------------------------
+    const float bins[][2]={{-5.f,12.f},{5.f,12.f}};
+    for(auto& b:bins)
+        if(circleCircle(cx,cz,CAR_R, b[0],b[1], 0.6f)) return true;
+
+    // --- Benches ----------------------------------------------------------
+    const float benches[][2]={{-6.f,10.f},{6.f,10.f}};
+    for(auto& b:benches)
+        if(circleCircle(cx,cz,CAR_R, b[0],b[1], 1.4f)) return true;
+
+    // --- Lamp posts -------------------------------------------------------
+    const float lamps[][2]={{0.f,14.f},{-12.f,14.f},{12.f,14.f}};
+    for(auto& l:lamps)
+        if(circleCircle(cx,cz,CAR_R, l[0],l[1], 0.55f)) return true;
+
+    return false;
+}
+
+// ============================================================
 // UPDATE TIMER (Week 8-9 animation)
 // ============================================================
 void update(int v)
@@ -884,18 +976,27 @@ void update(int v)
             sunHeight=sinf(D2R(sunAngle))*.78f+.22f;
             sunHeight=CLAMP(sunHeight,0.f,1.f);
         }
-        // Drive selected car
+        // Drive selected car  (with collision detection)
         Car& c=cars[selectedCar];
         float spd=.0f,turnR=0.f;
         if(keys['w']||keys['W']||skeys[0]) spd=.12f;
-        if(keys['s']||keys['S']||skeys[1]) spd=-.08f;
+        if(keys['x']||keys['X']||skeys[1]) spd=-.08f;
         if(keys['a']||keys['A']||skeys[2]) turnR=-2.f;
         if(keys['d']||keys['D']||skeys[3]) turnR= 2.f;
         c.heading+=turnR*(ABS(spd)>0.01f?1.f:0.3f);
         float hr=D2R(-c.heading);
-        c.x+=sinf(hr)*spd; c.z+=cosf(hr)*spd;
-        c.x=CLAMP(c.x,-19,19); c.z=CLAMP(c.z,-17,17);
-        c.wheelRot+=spd*R2D(1.f/0.36f);
+        // Compute candidate position then test for collisions
+        float nx=CLAMP(c.x+sinf(hr)*spd,-19.f,19.f);
+        float nz=CLAMP(c.z+cosf(hr)*spd,-17.f,17.f);
+        if(!checkCollision(nx,nz)){
+            c.x=nx; c.z=nz;              // accept move
+            c.wheelRot+=spd*R2D(1.f/0.36f);
+            collisionBlocked=false;
+        } else {
+            // Blocked: keep old position; flag only when car is actually
+            // trying to move forward/back (not just turning on the spot)
+            collisionBlocked=(ABS(spd)>0.01f);
+        }
     }
     glutPostRedisplay();
     glutTimerFunc(16,update,0);
@@ -971,8 +1072,11 @@ int main(int argc,char** argv)
     glClearColor(.5f,.75f,.97f,1);
     glEnable(GL_DEPTH_TEST);
     glShadeModel(GL_SMOOTH);
-    glEnable(GL_COLOR_MATERIAL);
-    glColorMaterial(GL_FRONT_AND_BACK,GL_AMBIENT_AND_DIFFUSE);
+    // Use explicit glMaterial calls instead of GL_COLOR_MATERIAL
+    // (GL_COLOR_MATERIAL was causing glColor calls to override
+    //  material settings and produced incorrect object colours)
+    // glEnable(GL_COLOR_MATERIAL);
+    // glColorMaterial(GL_FRONT_AND_BACK,GL_AMBIENT_AND_DIFFUSE);
 
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
