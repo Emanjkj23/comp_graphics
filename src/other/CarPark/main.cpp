@@ -26,15 +26,19 @@
 //   Week 12 - Full mini-project integration
 //
 // CONTROLS  (keyboard + clickable on-screen buttons):
-//   W A S D / Arrows - Move selected car
-//   TAB              - Switch selected car
-//   C                - Cycle camera (3 modes)
+//   W A S D / Arrows - Move selected car  OR  walk person
+//   ENTER            - Enter / Exit car (person must be within 3 units)
+//   TAB              - Switch selected car (only while driving)
+//   C                - Cycle camera (4 modes incl. 1st-person)
 //   N                - Toggle Day / Night
 //   L                - Cycle lighting mode
 //   Z                - Toggle depth test
 //   P                - Pause / Resume
 //   S                - Toggle sun orbit
-//   Mouse Drag       - Orbit camera (follow mode)
+//   I K              - Move building forward / backward
+//   J L              - Rotate building left / right
+//   U O              - Strafe building left / right
+//   Mouse Drag       - Orbit camera (overview mode)
 //   Scroll           - Zoom
 //   Click buttons    - Same as keyboard shortcuts
 //   ESC              - Quit
@@ -82,7 +86,7 @@ GLuint texID[5]={0,0,0,0,0};
 // ============================================================
 enum LightMode { LM_FULL=0,LM_NOSPEC=1,LM_AMBONLY=2,LM_OFF=3,LM_COUNT=4 };
 enum DepthMode { DM_ON=0,DM_OFF=1,DM_COUNT=2 };
-enum CamMode   { CM_FOLLOW=0,CM_OVERVIEW=1,CM_SIDE=2,CM_COUNT=3 };
+enum CamMode   { CM_FOLLOW=0,CM_OVERVIEW=1,CM_SIDE=2,CM_FIRST_PERSON=3,CM_COUNT=4 };
 
 LightMode lightMode = LM_FULL;
 DepthMode depthMode = DM_ON;
@@ -92,6 +96,27 @@ bool nightMode        = false;
 bool paused           = false;
 bool sunOrbiting      = true;
 bool collisionBlocked = false;  // true this frame when selected car hit an obstacle
+
+// ============================================================
+// BUILDING STATE (movable with I/J/K/L/U/O)
+// ============================================================
+float bldgX       = 0.f;
+float bldgZ       = 0.f;
+float bldgHeading = 0.f;   // degrees Y rotation
+
+// ============================================================
+// PERSON STATE
+// ============================================================
+struct Person {
+    float x, z;     // world position
+    float heading;  // degrees Y rotation
+    bool  inCar;    // true when seated in a car
+    float legAnim;  // walk cycle phase (radians)
+};
+Person player = { 0.f, 10.f, 0.f, false, 0.f };
+
+// Building move keys (separate from WASD)
+bool bkeys[6]={};  // i,k,j,l,u,o
 
 float sunAngle   = 60.f;   // degrees around Y axis
 float sunHeight  = 0.75f;  // 0=horizon,1=zenith
@@ -387,11 +412,103 @@ void drawTree(float x,float z,float h=4.5f)
 }
 
 // ============================================================
-// OFFICE BUILDING with glass facade
+// PERSON (hierarchical — sphere head, cube torso, cylinder limbs)
+// ============================================================
+void drawPerson(bool shadowPass)
+{
+    if(player.inCar) return; // hidden inside car
+
+    glPushMatrix();
+    glTranslatef(player.x, 0.f, player.z);
+    glRotatef(-player.heading, 0,1,0);
+
+    // --- Legs (animated) -------------------------------------------
+    float lSwing = sinf(player.legAnim) * 28.f; // degrees swing
+    float rSwing = -lSwing;
+
+    // Left leg
+    if(!shadowPass) safemat(.18f,.28f,.72f, .3f,.3f,.6f, 20.f); // jeans blue
+    glPushMatrix();
+        glTranslatef(-.14f, .65f, 0);
+        glRotatef(lSwing, 1,0,0);
+        glTranslatef(0,-.32f, 0);
+        glScalef(.16f,.65f,.16f); glutSolidCube(1);
+    glPopMatrix();
+    // Right leg
+    glPushMatrix();
+        glTranslatef( .14f, .65f, 0);
+        glRotatef(rSwing, 1,0,0);
+        glTranslatef(0,-.32f, 0);
+        glScalef(.16f,.65f,.16f); glutSolidCube(1);
+    glPopMatrix();
+
+    // --- Shoes -------------------------------------------------------
+    if(!shadowPass) safemat(.10f,.10f,.10f, .2f,.2f,.2f, 15.f);
+    glPushMatrix();
+        glTranslatef(-.14f, .07f, sinf(player.legAnim)*.06f-.04f);
+        glScalef(.18f,.10f,.26f); glutSolidCube(1);
+    glPopMatrix();
+    glPushMatrix();
+        glTranslatef( .14f, .07f, -sinf(player.legAnim)*.06f-.04f);
+        glScalef(.18f,.10f,.26f); glutSolidCube(1);
+    glPopMatrix();
+
+    // --- Torso -------------------------------------------------------
+    if(!shadowPass) safemat(.85f,.12f,.12f, .5f,.3f,.3f, 30.f); // red shirt
+    glPushMatrix();
+        glTranslatef(0, 1.10f, 0);
+        glScalef(.38f,.55f,.22f); glutSolidCube(1);
+    glPopMatrix();
+
+    // --- Arms --------------------------------------------------------
+    if(!shadowPass) safemat(.85f,.12f,.12f, .5f,.3f,.3f, 30.f);
+    glPushMatrix(); // left arm
+        glTranslatef(-.26f, 1.15f, 0);
+        glRotatef(-lSwing*.7f, 1,0,0);
+        glTranslatef(0,-.18f,0);
+        glScalef(.13f,.40f,.13f); glutSolidCube(1);
+    glPopMatrix();
+    glPushMatrix(); // right arm
+        glTranslatef( .26f, 1.15f, 0);
+        glRotatef(-rSwing*.7f, 1,0,0);
+        glTranslatef(0,-.18f,0);
+        glScalef(.13f,.40f,.13f); glutSolidCube(1);
+    glPopMatrix();
+
+    // --- Neck --------------------------------------------------------
+    if(!shadowPass) safemat(.88f,.68f,.50f, .4f,.3f,.2f, 15.f); // skin
+    glPushMatrix();
+        glTranslatef(0, 1.44f, 0);
+        glRotatef(-90,1,0,0); glutSolidCylinder(.07f,.14f,8,2);
+    glPopMatrix();
+
+    // --- Head --------------------------------------------------------
+    if(!shadowPass) safemat(.88f,.68f,.50f, .5f,.4f,.3f, 25.f);
+    glPushMatrix();
+        glTranslatef(0, 1.65f, 0);
+        glScalef(.28f,.30f,.26f); glutSolidSphere(1,14,10);
+    glPopMatrix();
+
+    // --- Hair --------------------------------------------------------
+    if(!shadowPass) safemat(.18f,.10f,.04f, .1f,.1f,.05f, 5.f);
+    glPushMatrix();
+        glTranslatef(0, 1.78f, -.03f);
+        glScalef(.29f,.15f,.27f); glutSolidSphere(1,12,8);
+    glPopMatrix();
+
+    glPopMatrix();
+}
+
+// ============================================================
+// OFFICE BUILDING with glass facade  (movable)
 // ============================================================
 void drawOffice()
 {
-    glPushMatrix(); glTranslatef(0,0,-16.f);
+    glPushMatrix();
+    // Apply building movement on top of its default world position
+    glTranslatef(bldgX, 0.f, bldgZ);
+    glRotatef(-bldgHeading, 0,1,0);
+    glTranslatef(0,0,-16.f);
     // Main concrete body  (concrete texture modulated with material colour)
     mat(.72f,.72f,.70f,.3f,.3f,.28f,18.f);
     glEnable(GL_TEXTURE_2D);
@@ -816,6 +933,9 @@ void drawShadowGeom()
     drawBench(-6,10);
     drawBench(6,10,180);
 
+    // Person shadow
+    drawPerson(true);
+
     inShadowPass=false;
 }
 
@@ -923,7 +1043,7 @@ void aNight()  {nightMode=!nightMode;}
 void aPause()  {paused=!paused;}
 void aSun()    {sunOrbiting=!sunOrbiting;}
 void aCam()    {camMode=(CamMode)((camMode+1)%CM_COUNT);}
-void aTab()    {selectedCar=(selectedCar+1)%4;}
+void aTab()    {if(player.inCar) selectedCar=(selectedCar+1)%4;}
 
 Btn btns[]={
     {8,200,170,30,"[L] Lighting",    .2f,.7f,.2f, aLight},
@@ -1015,7 +1135,7 @@ void drawHUD()
     t9(14,WIN_H-24,"CAR PARK SCENE — OpenGL All-Concepts Demo",0.3f,1.f,0.4f);
 
     const char* lmN[]={"FULL PHONG","NO SPECULAR","AMBIENT ONLY","LIGHTS OFF"};
-    const char* camN[]={"OVERVIEW","FOLLOW CAR","SIDE VIEW"};
+    const char* camN[]={"OVERVIEW","FOLLOW CAR","SIDE VIEW","FIRST PERSON"};
     snprintf(buf,256,"Lighting: %-16s | Depth: %-12s | Camera: %-12s | %s",
         lmN[lightMode], depthMode==DM_ON?"ON":"OFF!",
         camN[camMode], nightMode?"NIGHT":"DAY");
@@ -1024,8 +1144,12 @@ void drawHUD()
     float sb=lightMode==LM_FULL?.3f:.2f;
     t8(14,WIN_H-46,buf,sr,sg,sb);
 
-    snprintf(buf,256,"Selected: %s  (TAB=next car)  |  Sun: %.0f deg  |  %s",
-        cars[selectedCar].name, sunAngle, paused?"*** PAUSED ***":"Animating");
+    if(player.inCar)
+        snprintf(buf,256,"Driving: %s  (ENTER=exit)  |  Sun: %.0f deg  |  %s",
+            cars[selectedCar].name, sunAngle, paused?"*** PAUSED ***":"Animating");
+    else
+        snprintf(buf,256,"Walking  (ENTER near car to enter)  |  Sun: %.0f deg  |  %s",
+            sunAngle, paused?"*** PAUSED ***":"Animating");
     t8(14,WIN_H-64,buf,1.f,1.f,.5f);
 
     const char* lmExp[]={"Full Phong: all 3 lighting components — best depth perception",
@@ -1034,8 +1158,15 @@ void drawHUD()
                          "Lights Off: pure flat colours — impossible to judge 3D depth"};
     t8(14,WIN_H-82,lmExp[lightMode],1.f,.95f,.65f);
 
-    t8(14,WIN_H-100,"WASD/Arrows=Drive  SPACE=Brake  TAB=Switch Car  C=Camera  Click buttons below",
-        .65f,.65f,.65f);
+    // Show different control hints depending on person state
+    if(!player.inCar){
+        t8(14,WIN_H-100,"WASD=Walk  ENTER=Enter Car (get close!)  C=Camera  R=Reset  I/K/J/L=Move Building",
+            .65f,.65f,.65f);
+    } else {
+        snprintf(buf,256,"WASD=Drive [%s]  ENTER=Exit Car  TAB=Switch Car  C=Camera  I/K/J/L=Building",
+            cars[selectedCar].name);
+        t8(14,WIN_H-100,buf,.65f,.65f,.65f);
+    }
     t8(14,WIN_H-116,"Wk1:Pipeline  Wk2:Camera  Wk3-4:Modelling  Wk5:Math/Shadows  Wk6:Colour",
         .5f,.75f,.5f);
     // Right side: week panel
@@ -1061,7 +1192,7 @@ void drawHUD()
 }
 
 // ============================================================
-// WEEK 2 - VIEWING: 3 camera modes
+// WEEK 2 - VIEWING: 4 camera modes (incl. First-Person)
 // ============================================================
 void applyCamera()
 {
@@ -1083,6 +1214,29 @@ void applyCamera()
         }
         case CM_SIDE: {
             gluLookAt(25,12,0, 0,2,0, 0,1,0);
+            break;
+        }
+        case CM_FIRST_PERSON: {
+            // Eye position: person's head (or driver seat)
+            float eyeX, eyeY, eyeZ, fwdX, fwdZ, heading;
+            if(player.inCar){
+                // Driving: view from driver seat (slightly left of centre)
+                heading = D2R(-sel.heading);
+                eyeX = sel.x - sinf(heading)*0.4f;
+                eyeY = 1.2f;  // seat height
+                eyeZ = sel.z - cosf(heading)*0.4f;
+            } else {
+                // Walking: head level
+                heading = D2R(-player.heading);
+                eyeX = player.x;
+                eyeY = 1.65f;  // eye height
+                eyeZ = player.z;
+            }
+            fwdX = eyeX - sinf(heading)*4.f;
+            fwdZ = eyeZ - cosf(heading)*4.f;
+            gluLookAt(eyeX, eyeY, eyeZ,
+                      fwdX, eyeY, fwdZ,
+                      0,1,0);
             break;
         }
         default: break;
@@ -1135,6 +1289,7 @@ void display()
     drawFlowerBed( 11,-2,4,3);
 
     for(int i=0;i<4;i++) drawCar(i);
+    drawPerson(false);  // draw person after cars
 
     drawHUD();
     drawButtons();
@@ -1210,6 +1365,29 @@ bool checkCollision(float cx,float cz)
 // ============================================================
 // UPDATE TIMER (Week 8-9 animation)
 // ============================================================
+
+// Person footprint radius (small, like a person)
+static const float PERSON_R = 0.35f;
+
+// True if placing the person at (px,pz) would cause a collision
+bool checkPersonCollision(float px, float pz)
+{
+    // Office building (world footprint applies bldg offset too)
+    // We use a simplified fixed AABB for now (building starts at z=-16,
+    // depth 6 each side, width 18 each side)
+    float bfx0 = bldgX - 9.f, bfx1 = bldgX + 9.f;
+    float bfz0 = bldgZ - 19.f, bfz1 = bldgZ - 13.f;
+    if(circleAABB(px,pz,PERSON_R, bfx0,bfx1, bfz0,bfz1)) return true;
+
+    // Trees
+    const float txs[]={-17.f,-17.f,-17.f,17.f,17.f,17.f,-17.f,17.f};
+    const float tzs[]={-10.f,  0.f, 10.f,-10.f, 0.f,10.f, -4.f,-4.f};
+    for(int t=0;t<8;t++)
+        if(circleCircle(px,pz,PERSON_R, txs[t],tzs[t], 0.50f)) return true;
+
+    return false;
+}
+
 void update(int v)
 {
     if(!paused){
@@ -1219,26 +1397,63 @@ void update(int v)
             sunHeight=sinf(D2R(sunAngle))*.78f+.22f;
             sunHeight=CLAMP(sunHeight,0.f,1.f);
         }
-        // Drive selected car  (with collision detection)
-        Car& c=cars[selectedCar];
-        float spd=.0f,turnR=0.f;
-        if(keys['w']||keys['W']||skeys[0]) spd=.12f;
-        if(keys['x']||keys['X']||skeys[1]) spd=-.08f;
-        if(keys['a']||keys['A']||skeys[2]) turnR=-2.f;
-        if(keys['d']||keys['D']||skeys[3]) turnR= 2.f;
-        c.heading+=turnR*(ABS(spd)>0.01f?1.f:0.3f);
-        float hr=D2R(-c.heading);
-        // Compute candidate position then test for collisions
-        float nx=CLAMP(c.x+sinf(hr)*spd,-19.f,19.f);
-        float nz=CLAMP(c.z+cosf(hr)*spd,-17.f,17.f);
-        if(!checkCollision(nx,nz)){
-            c.x=nx; c.z=nz;              // accept move
-            c.wheelRot+=spd*R2D(1.f/0.36f);
-            collisionBlocked=false;
+
+        // ---- Building movement (I/J/K/L/U/O) ----------------------
+        {
+            float bspd=0.f, bturn=0.f, bstrafe=0.f;
+            if(bkeys[0]) bspd=   .12f;   // I  forward
+            if(bkeys[1]) bspd=  -.10f;   // K  backward
+            if(bkeys[2]) bturn= -1.5f;   // J  rotate left
+            if(bkeys[3]) bturn=  1.5f;   // L  rotate right
+            if(bkeys[4]) bstrafe=-0.10f; // U  strafe left
+            if(bkeys[5]) bstrafe= 0.10f; // O  strafe right
+            bldgHeading += bturn;
+            float bhr = D2R(-bldgHeading);
+            bldgX += sinf(bhr)*bspd - cosf(bhr)*bstrafe;
+            bldgZ += cosf(bhr)*bspd + sinf(bhr)*bstrafe;
+        }
+
+        // ---- Person walking (WASD when not in car) ----------------
+        if(!player.inCar){
+            float pspd=0.f, pturn=0.f;
+            if(keys['w']||keys['W']||skeys[0]) pspd=  .07f;
+            if(keys['x']||keys['X']||skeys[1]) pspd= -.05f;
+            if(keys['a']||keys['A']||skeys[2]) pturn= -2.5f;
+            if(keys['d']||keys['D']||skeys[3]) pturn=  2.5f;
+            player.heading += pturn;
+            float phr = D2R(-player.heading);
+            float npx = CLAMP(player.x + sinf(phr)*pspd, -19.f, 19.f);
+            float npz = CLAMP(player.z + cosf(phr)*pspd, -17.f, 17.f);
+            if(!checkPersonCollision(npx, npz)){
+                player.x = npx;
+                player.z = npz;
+            }
+            // Leg animation: only cycle when moving
+            if(ABS(pspd) > 0.005f)
+                player.legAnim = fmodf(player.legAnim + ABS(pspd)*8.f, 2.f*PI);
+
         } else {
-            // Blocked: keep old position; flag only when car is actually
-            // trying to move forward/back (not just turning on the spot)
-            collisionBlocked=(ABS(spd)>0.01f);
+            // ---- Driving selected car (WASD when in car) -----------
+            Car& c=cars[selectedCar];
+            float spd=.0f,turnR=0.f;
+            if(keys['w']||keys['W']||skeys[0]) spd=.12f;
+            if(keys['x']||keys['X']||skeys[1]) spd=-.08f;
+            if(keys['a']||keys['A']||skeys[2]) turnR=-2.f;
+            if(keys['d']||keys['D']||skeys[3]) turnR= 2.f;
+            c.heading+=turnR*(ABS(spd)>0.01f?1.f:0.3f);
+            float hr=D2R(-c.heading);
+            float nx=CLAMP(c.x+sinf(hr)*spd,-19.f,19.f);
+            float nz=CLAMP(c.z+cosf(hr)*spd,-17.f,17.f);
+            if(!checkCollision(nx,nz)){
+                c.x=nx; c.z=nz;
+                c.wheelRot+=spd*R2D(1.f/0.36f);
+                collisionBlocked=false;
+            } else {
+                collisionBlocked=(ABS(spd)>0.01f);
+            }
+            // Keep person glued to car while driving
+            player.x = c.x;
+            player.z = c.z;
         }
     }
     glutPostRedisplay();
@@ -1250,20 +1465,72 @@ void update(int v)
 // ============================================================
 void keyDown(unsigned char k,int x,int y){
     keys[k]=true;
+    // Building movement key state
+    if(k=='i'||k=='I') bkeys[0]=true;
+    if(k=='k'||k=='K') bkeys[1]=true;
+    if(k=='j'||k=='J') bkeys[2]=true;
+    if(k=='l'||k=='L') bkeys[3]=true;
+    if(k=='u'||k=='U') bkeys[4]=true;
+    if(k=='o'||k=='O') bkeys[5]=true;
     switch(k){
         case 27: exit(0);
-        case 'l':case'L': aLight(); break;
+        // Note: L is now overloaded — click HUD button for lighting, 
+        // change later if want L function key:-> case 'l':case'L': aLight(); break;
+        // or use keyboard which moves the building (bkeys[3]).
+        // We keep aLight() on the button only.
         case 'z':case'Z': aDepth(); break;
         case 'n':case'N': aNight(); break;
         case 'p':case'P': aPause(); break;
         case 's':case'S': aSun();   break;
         case 'c':case'C': aCam();   break;
-        case '\t':         aTab();   break;
+        case '\t':         if(player.inCar) aTab(); break; // tab only while driving
         case 'r':case'R':
-            cars[selectedCar].x=0; cars[selectedCar].z=0; break;
+            if(player.inCar){
+                cars[selectedCar].x=0; cars[selectedCar].z=0;
+            } else {
+                player.x=0; player.z=10;
+            }
+            break;
+        case '\r':case'\n': { // ENTER key: enter / exit car
+            if(!player.inCar){
+                // Find nearest car within interaction distance
+                float bestDist = 3.2f; // max reach
+                int bestCar = -1;
+                for(int i=0;i<4;i++){
+                    float dx=player.x-cars[i].x, dz=player.z-cars[i].z;
+                    float dist=sqrtf(dx*dx+dz*dz);
+                    if(dist < bestDist){ bestDist=dist; bestCar=i; }
+                }
+                if(bestCar>=0){
+                    player.inCar   = true;
+                    selectedCar    = bestCar;
+                }
+            } else {
+                // Exit car: drop person to left of car (driver door side)
+                Car& c = cars[selectedCar];
+                float hr = D2R(-c.heading);
+                float exitX = c.x - cosf(hr)*1.8f;
+                float exitZ = c.z + sinf(hr)*1.8f;
+                player.x       = exitX;
+                player.z       = exitZ;
+                player.heading = c.heading;
+                player.inCar   = false;
+                collisionBlocked = false;
+            }
+            break;
+        }
     }
 }
-void keyUp(unsigned char k,int x,int y){keys[k]=false;}
+void keyUp(unsigned char k,int x,int y){
+    keys[k]=false;
+    // Release building movement keys
+    if(k=='i'||k=='I') bkeys[0]=false;
+    if(k=='k'||k=='K') bkeys[1]=false;
+    if(k=='j'||k=='J') bkeys[2]=false;
+    if(k=='l'||k=='L') bkeys[3]=false;
+    if(k=='u'||k=='U') bkeys[4]=false;
+    if(k=='o'||k=='O') bkeys[5]=false;
+}
 void specDown(int k,int x,int y){
     if(k==GLUT_KEY_UP)    skeys[0]=true;
     if(k==GLUT_KEY_DOWN)  skeys[1]=true;
