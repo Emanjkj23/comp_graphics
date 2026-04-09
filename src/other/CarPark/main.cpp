@@ -20,7 +20,8 @@
 //   Week 6  - RGB materials, depth test, alpha blending
 //   Week 7  - Phong lighting (directional sun + point lamp), Gouraud
 //   Week 8-9- Keyboard, mouse, timer, clickable HUD buttons
-//   Week 10 - 2D HUD overlay, texture concept demonstration
+//   Week 10 - 2D HUD overlay, procedural texture mapping, mipmaps, anisotropic
+//             filtering, MSAA anti-aliasing (GL_MULTISAMPLE)
 //   Week 11 - Ethics panel visible in HUD
 //   Week 12 - Full mini-project integration
 //
@@ -45,6 +46,15 @@
 #include <cstdlib>
 #include <cstring>
 
+// Extension / core constants that older freeglut headers may omit
+#ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
+#  define GL_TEXTURE_MAX_ANISOTROPY_EXT     0x84FE
+#  define GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT 0x84FF
+#endif
+#ifndef GL_MULTISAMPLE
+#  define GL_MULTISAMPLE  0x809D
+#endif
+
 // ============================================================
 // WEEK 5 - MATH FOUNDATIONS
 // ============================================================
@@ -55,6 +65,17 @@
 #define ABS(v)  ((v)<0?-(v):(v))
 
 int WIN_W=1280, WIN_H=760;
+
+// ============================================================
+// WEEK 10 - TEXTURE HANDLES
+// 5 procedurally-generated textures (no external files needed)
+//   0 = asphalt      (dark grey gritty surface)
+//   1 = concrete     (light grey, slightly rough)
+//   2 = grass        (green stippled)
+//   3 = road-marking (yellow/white paint)
+//   4 = tyre-mark    (dark rubber smudge decal)
+// ============================================================
+GLuint texID[5]={0,0,0,0,0};
 
 // ============================================================
 // SCENE STATE
@@ -167,7 +188,8 @@ void setupLights()
 
     GLfloat sD[]={rs,gs,bs,1};
     GLfloat sS[]={rs*.6f,gs*.6f,bs*.6f,1};
-    GLfloat sA[]={nightMode?.05f:rs*.18f,nightMode?.05f:gs*.18f,nightMode?.10f:bs*.25f,1};
+    // Raised ambient from .18 → .38 so ground/textures are not near-black in day
+    GLfloat sA[]={nightMode?.05f:rs*.38f,nightMode?.05f:gs*.38f,nightMode?.10f:bs*.42f,1};
     if(lightMode==LM_AMBONLY){sD[0]=sD[1]=sD[2]=0;sS[0]=sS[1]=sS[2]=0;}
     glEnable(GL_LIGHT0);
     glLightfv(GL_LIGHT0,GL_POSITION,sunPos);
@@ -299,22 +321,68 @@ void drawCar(int idx)
 
 // ============================================================
 // WEEK 3-4 - TREE (hierarchical: trunk → branches → foliage)
+// Richer model: tapered root flare + bark texture + 5 foliage
+// clusters with varied colour (shadow-green → sunlit yellow-green)
 // ============================================================
 void drawTree(float x,float z,float h=4.5f)
 {
     glPushMatrix(); glTranslatef(x,0,z);
-    // Trunk (bark brown)
-    mat(.40f,.26f,.12f,.10f,.08f,.05f,8.f);
-    glPushMatrix(); glRotatef(-90,1,0,0); glutSolidCylinder(.28f,h*.7f,12,5); glPopMatrix();
-    // Foliage L1 - darkest
-    mat(.15f,.52f,.10f,.05f,.15f,.03f,8.f);
-    glPushMatrix(); glTranslatef(.1f,h*.6f,.1f); glScalef(1.3f,.9f,1.3f); glutSolidSphere(h*.28f,14,10); glPopMatrix();
-    // L2
-    mat(.20f,.62f,.13f,.07f,.20f,.04f,12.f);
-    glPushMatrix(); glTranslatef(-.1f,h*.78f,.0f); glScalef(1.1f,1.f,1.1f); glutSolidSphere(h*.22f,12,9); glPopMatrix();
-    // L3 top
-    mat(.26f,.72f,.17f,.09f,.25f,.06f,16.f);
-    glPushMatrix(); glTranslatef(0,h*.94f,0); glutSolidSphere(h*.14f,10,7); glPopMatrix();
+
+    // --- Root flare: 4 short flat ellipsoids radiating from base ----------
+    mat(.32f,.20f,.08f,.06f,.04f,.02f,5.f);
+    for(int r=0;r<4;r++){
+        glPushMatrix();
+        glRotatef(r*90.f,0,1,0);
+        glTranslatef(.38f,.05f,0);
+        glScalef(.55f,.12f,.22f); glutSolidSphere(1,8,4);
+        glPopMatrix();
+    }
+
+    // --- Trunk: bark texture modulated on cylinder (-90 deg = stand up) ---
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texID[4]);   // reuse tyre-mark slot as bark
+    glTexEnvf(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_MODULATE);
+    mat(.42f,.27f,.11f,.12f,.08f,.04f,10.f);
+    // Lower trunk (wider)
+    glPushMatrix(); glRotatef(-90,1,0,0);
+    glutSolidCylinder(.30f,h*.45f,14,6); glPopMatrix();
+    // Upper trunk (tapers slightly)
+    glPushMatrix(); glTranslatef(0,h*.45f,0); glRotatef(-90,1,0,0);
+    glutSolidCylinder(.22f,h*.28f,12,4); glPopMatrix();
+    glDisable(GL_TEXTURE_2D);
+
+    // --- 2-3 branch stubs sprouting sideways near canopy base -------------
+    mat(.38f,.24f,.10f,.08f,.06f,.03f,6.f);
+    for(int b=0;b<3;b++){
+        glPushMatrix();
+        glRotatef(b*120.f+15.f,0,1,0);
+        glTranslatef(0,h*.58f,0);
+        glRotatef(55.f,0,0,1);
+        glutSolidCylinder(.09f,h*.20f,8,2);
+        glPopMatrix();
+    }
+
+    // --- 5 foliage clusters: shadow-dark at base → sunlit at crown --------
+    // L1 — broad, dark shadow-green at lower canopy
+    mat(.13f,.46f,.09f,.04f,.12f,.02f,8.f);
+    glPushMatrix(); glTranslatef( .15f,h*.58f, .10f); glScalef(1.35f,.85f,1.35f); glutSolidSphere(h*.29f,16,11); glPopMatrix();
+
+    // L2 — mid-green, offset opposite
+    mat(.18f,.56f,.11f,.06f,.16f,.03f,10.f);
+    glPushMatrix(); glTranslatef(-.18f,h*.70f,-.08f); glScalef(1.15f,.95f,1.10f); glutSolidSphere(h*.24f,14,10); glPopMatrix();
+
+    // L3 — slightly brighter, front
+    mat(.22f,.64f,.14f,.08f,.20f,.04f,12.f);
+    glPushMatrix(); glTranslatef( .08f,h*.80f, .15f); glScalef(1.05f,1.00f,1.05f); glutSolidSphere(h*.20f,13,9); glPopMatrix();
+
+    // L4 — yellow-green sunlit, near top
+    mat(.30f,.70f,.16f,.10f,.26f,.06f,16.f);
+    glPushMatrix(); glTranslatef(-.06f,h*.90f, .05f); glScalef(.95f,1.00f,.90f); glutSolidSphere(h*.16f,12,8); glPopMatrix();
+
+    // L5 — bright lime highlight at very crown
+    mat(.38f,.78f,.20f,.14f,.32f,.08f,22.f);
+    glPushMatrix(); glTranslatef( .02f,h*1.02f,.02f); glutSolidSphere(h*.10f,10,7); glPopMatrix();
+
     glPopMatrix();
 }
 
@@ -324,9 +392,52 @@ void drawTree(float x,float z,float h=4.5f)
 void drawOffice()
 {
     glPushMatrix(); glTranslatef(0,0,-16.f);
-    // Main concrete body
+    // Main concrete body  (concrete texture modulated with material colour)
     mat(.72f,.72f,.70f,.3f,.3f,.28f,18.f);
-    glPushMatrix(); glTranslatef(0,5.5f,0); glScalef(18.f,11.f,6.f); glutSolidCube(1); glPopMatrix();
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texID[1]);  // concrete
+    glTexEnvf(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_MODULATE);
+    glPushMatrix(); glTranslatef(0,5.5f,0);
+    // Emit textured quads for front/back/sides to show realistic surface.
+    // glutSolidCube doesn't emit tex-coords, so we draw the facing faces manually
+    // and fall back to glutSolidCube for the core bulk (top/bottom/interior).
+    // Front face of building (z=+3, XZ extents 18x11)
+    glBegin(GL_QUADS); glNormal3f(0,0,1);
+    glTexCoord2f(0,0); glVertex3f(-9,-5.5f, 3);
+    glTexCoord2f(6,0); glVertex3f( 9,-5.5f, 3);
+    glTexCoord2f(6,4); glVertex3f( 9, 5.5f, 3);
+    glTexCoord2f(0,4); glVertex3f(-9, 5.5f, 3);
+    glEnd();
+    // Back face (z=-3)
+    glBegin(GL_QUADS); glNormal3f(0,0,-1);
+    glTexCoord2f(0,0); glVertex3f( 9,-5.5f,-3);
+    glTexCoord2f(6,0); glVertex3f(-9,-5.5f,-3);
+    glTexCoord2f(6,4); glVertex3f(-9, 5.5f,-3);
+    glTexCoord2f(0,4); glVertex3f( 9, 5.5f,-3);
+    glEnd();
+    // Left face (x=-9)
+    glBegin(GL_QUADS); glNormal3f(-1,0,0);
+    glTexCoord2f(0,0); glVertex3f(-9,-5.5f,-3);
+    glTexCoord2f(2,0); glVertex3f(-9,-5.5f, 3);
+    glTexCoord2f(2,4); glVertex3f(-9, 5.5f, 3);
+    glTexCoord2f(0,4); glVertex3f(-9, 5.5f,-3);
+    glEnd();
+    // Right face (x=+9)
+    glBegin(GL_QUADS); glNormal3f(1,0,0);
+    glTexCoord2f(0,0); glVertex3f( 9,-5.5f, 3);
+    glTexCoord2f(2,0); glVertex3f( 9,-5.5f,-3);
+    glTexCoord2f(2,4); glVertex3f( 9, 5.5f,-3);
+    glTexCoord2f(0,4); glVertex3f( 9, 5.5f, 3);
+    glEnd();
+    // Top face (y=+5.5)
+    glBegin(GL_QUADS); glNormal3f(0,1,0);
+    glTexCoord2f(0,0); glVertex3f(-9, 5.5f,-3);
+    glTexCoord2f(6,0); glVertex3f( 9, 5.5f,-3);
+    glTexCoord2f(6,2); glVertex3f( 9, 5.5f, 3);
+    glTexCoord2f(0,2); glVertex3f(-9, 5.5f, 3);
+    glEnd();
+    glPopMatrix();
+    glDisable(GL_TEXTURE_2D);
     // Roof parapet
     mat(.58f,.58f,.56f,.25f,.25f,.22f,12.f);
     glPushMatrix(); glTranslatef(0,11.3f,0); glScalef(18.2f,.6f,6.2f); glutSolidCube(1); glPopMatrix();
@@ -453,36 +564,161 @@ void drawFlowerBed(float cx,float cz,float w,float d)
 }
 
 // ============================================================
+// WEEK 10 - TEXTURE GENERATION
+// Procedural textures are built in CPU memory then uploaded with
+// gluBuild2DMipmaps so every mip-level is auto-generated
+// (prevents aliasing when the ground is viewed at a shallow angle).
+// Anisotropic filtering further sharpens oblique views.
+// ============================================================
+static void makeNoise(unsigned char* p,int sz,
+                      unsigned char r,unsigned char g,unsigned char b,
+                      int var,unsigned seed)
+{
+    srand(seed);
+    for(int i=0;i<sz*sz;i++){
+        int v=rand()%var-var/2;
+        p[i*3+0]=(unsigned char)CLAMP(r+v,0,255);
+        p[i*3+1]=(unsigned char)CLAMP(g+v,0,255);
+        p[i*3+2]=(unsigned char)CLAMP(b+v,0,255);
+    }
+}
+
+void initTextures()
+{
+    const int SZ=128;  // texture resolution (power-of-two)
+    static unsigned char buf[SZ*SZ*3];
+
+    glGenTextures(4,texID);
+
+    // Helper: upload buffer as mip-mapped RGB texture
+    auto upload=[&](int idx){
+        glBindTexture(GL_TEXTURE_2D, texID[idx]);
+        // Mipmapping: MIN uses mip chain to avoid glittering at distance
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+        // Repeat across large quads
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+        // Anisotropic filtering (extension present on every modern driver)
+        float maxAniso=1.f;
+        glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT,&maxAniso);
+        glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                        maxAniso>8.f?8.f:maxAniso);
+        // gluBuild2DMipmaps auto-generates all mip levels
+        gluBuild2DMipmaps(GL_TEXTURE_2D,GL_RGB,SZ,SZ,GL_RGB,GL_UNSIGNED_BYTE,buf);
+    };
+
+    // --- Texture 0: Asphalt (medium grey — brighter so GL_MODULATE doesn't
+    //     make it near-black; was 52 → now 110 with tighter noise) ----------
+    makeNoise(buf,SZ, 110,110,116, 20, 0xA5);
+    upload(0);
+
+    // --- Texture 1: Concrete wall (light grey, coarser variation) ----------
+    makeNoise(buf,SZ,185,183,178, 22, 0xC3);
+    upload(1);
+
+    // --- Texture 2: Grass (richer green — multi-shade blade stipple) --------
+    makeNoise(buf,SZ, 95,162,48, 30, 0x7F);
+    // Scatter lighter sun-catch blades
+    srand(0x2E);
+    for(int i=0;i<SZ*SZ/5;i++){
+        int px=rand()%(SZ*SZ);
+        buf[px*3+0]=(unsigned char)CLAMP(buf[px*3+0]+20,0,255);
+        buf[px*3+1]=(unsigned char)CLAMP(buf[px*3+1]+28,0,255);
+        buf[px*3+2]=(unsigned char)CLAMP(buf[px*3+2]+ 8,0,255);
+    }
+    // Scatter darker shadow blades
+    srand(0xB1);
+    for(int i=0;i<SZ*SZ/8;i++){
+        int px=rand()%(SZ*SZ);
+        buf[px*3+0]=(unsigned char)CLAMP(buf[px*3+0]-30,0,255);
+        buf[px*3+1]=(unsigned char)CLAMP(buf[px*3+1]-40,0,255);
+        buf[px*3+2]=(unsigned char)CLAMP(buf[px*3+2]-12,0,255);
+    }
+    upload(2);
+
+    // --- Texture 3: Road-marking paint (near-white with slight yellow cast) -
+    makeNoise(buf,SZ,238,235,200, 10, 0x11);
+    upload(3);
+
+    // --- Texture 4: Bark / tyre-mark dual-use texture ----------------------
+    // Used on tree trunks as bark (dark brown vertical streaks).
+    // Also applied inverted as tyre-mark decal (very dark rubber smudge).
+    glGenTextures(1,&texID[4]);  // slot 4 needs a separate glGenTextures
+    makeNoise(buf,SZ, 58,36,16, 18, 0x3D);
+    // Vertical dark streaks to simulate bark grain
+    srand(0x5C);
+    for(int col=0;col<SZ;col+=3+rand()%4){
+        unsigned char dark=(unsigned char)(28+rand()%18);
+        int streak_w=1+rand()%2;
+        for(int row=0;row<SZ;row++){
+            for(int sw=0;sw<streak_w&&col+sw<SZ;sw++){
+                int px=(row*SZ+col+sw);
+                buf[px*3+0]=(unsigned char)CLAMP(buf[px*3+0]-(int)dark,0,255);
+                buf[px*3+1]=(unsigned char)CLAMP(buf[px*3+1]-(int)(dark*.8f),0,255);
+                buf[px*3+2]=(unsigned char)CLAMP(buf[px*3+2]-(int)(dark*.4f),0,255);
+            }
+        }
+    }
+    glBindTexture(GL_TEXTURE_2D, texID[4]);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_REPEAT);
+    gluBuild2DMipmaps(GL_TEXTURE_2D,GL_RGB,SZ,SZ,GL_RGB,GL_UNSIGNED_BYTE,buf);
+
+    glBindTexture(GL_TEXTURE_2D,0); // unbind
+}
+
+// ============================================================
 // GROUND: tarmac, bays, road markings, pavement, grass borders
 // ============================================================
 void drawGround()
 {
-    // Large tarmac base
-    mat(.22f,.22f,.24f,.12f,.12f,.12f,8.f);
+    glEnable(GL_TEXTURE_2D);
+    // Texture modulates with the Phong material colour (GL_MODULATE)
+    glTexEnvf(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_MODULATE);
+
+    // --- Large tarmac base (asphalt texture)
+    // Raised diffuse .22→.52 so GL_MODULATE with brighter texture stays visible
+    mat(.52f,.52f,.54f,.15f,.15f,.15f,10.f);
+    glBindTexture(GL_TEXTURE_2D, texID[0]);   // asphalt
     glBegin(GL_QUADS); glNormal3f(0,1,0);
-    glVertex3f(-20,0,-18); glVertex3f(20,0,-18);
-    glVertex3f(20,0,18);   glVertex3f(-20,0,18);
+    glTexCoord2f(0,0);  glVertex3f(-20,0,-18);
+    glTexCoord2f(8,0);  glVertex3f( 20,0,-18);
+    glTexCoord2f(8,9);  glVertex3f( 20,0, 18);
+    glTexCoord2f(0,9);  glVertex3f(-20,0, 18);
     glEnd();
 
-    // Grass border strip (left & right of car park)
-    mat(.35f,.62f,.20f,.05f,.10f,.03f,5.f);
+    // --- Grass border strips (left & right) --------------------------------
+    mat(.50f,.78f,.30f,.06f,.14f,.04f,6.f);
+    glBindTexture(GL_TEXTURE_2D, texID[2]);   // grass
     glBegin(GL_QUADS); glNormal3f(0,1,0);
-    glVertex3f(-20,.01f,-18); glVertex3f(-15,.01f,-18);
-    glVertex3f(-15,.01f,18);  glVertex3f(-20,.01f,18);
+    glTexCoord2f(0,0); glVertex3f(-20,.01f,-18);
+    glTexCoord2f(2,0); glVertex3f(-15,.01f,-18);
+    glTexCoord2f(2,9); glVertex3f(-15,.01f, 18);
+    glTexCoord2f(0,9); glVertex3f(-20,.01f, 18);
     glEnd();
     glBegin(GL_QUADS); glNormal3f(0,1,0);
-    glVertex3f(15,.01f,-18); glVertex3f(20,.01f,-18);
-    glVertex3f(20,.01f,18);  glVertex3f(15,.01f,18);
-    glEnd();
-
-    // Tar road (main drive aisle, centre)
-    mat(.18f,.18f,.20f,.10f,.10f,.10f,10.f);
-    glBegin(GL_QUADS); glNormal3f(0,1,0);
-    glVertex3f(-4,.01f,-18); glVertex3f(4,.01f,-18);
-    glVertex3f(4,.01f,16);   glVertex3f(-4,.01f,16);
+    glTexCoord2f(0,0); glVertex3f(15,.01f,-18);
+    glTexCoord2f(2,0); glVertex3f(20,.01f,-18);
+    glTexCoord2f(2,9); glVertex3f(20,.01f, 18);
+    glTexCoord2f(0,9); glVertex3f(15,.01f, 18);
     glEnd();
 
-    // Parking bay lines (white)
+    // --- Tar road drive aisle (slightly darker than bay asphalt) -----------
+    mat(.44f,.44f,.46f,.12f,.12f,.12f,10.f);
+    glBindTexture(GL_TEXTURE_2D, texID[0]);   // asphalt
+    glBegin(GL_QUADS); glNormal3f(0,1,0);
+    glTexCoord2f(0,0); glVertex3f(-4,.01f,-18);
+    glTexCoord2f(2,0); glVertex3f( 4,.01f,-18);
+    glTexCoord2f(2,8); glVertex3f( 4,.01f, 16);
+    glTexCoord2f(0,8); glVertex3f(-4,.01f, 16);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D);  // markings drawn flat with glColor
+
+    // --- Parking bay lines (white) -----------------------------------------
     glDisable(GL_LIGHTING);
     glColor3f(.95f,.95f,.95f);
     // Left bay rows
@@ -534,12 +770,19 @@ void drawGround()
         glVertex3f(zx+.5f,.02f,16.f); glVertex3f(zx,.02f,16.f);
         glEnd();
     }
-    // Pavement strip (front entrance)
-    glColor3f(.75f,.72f,.68f);
-    glBegin(GL_QUADS);
-    glVertex3f(-20,.02f,14); glVertex3f(20,.02f,14);
-    glVertex3f(20,.02f,18);  glVertex3f(-20,.02f,18);
+    // Pavement strip (concrete texture)
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, texID[1]);   // concrete
+    if(lightMode!=LM_OFF) glEnable(GL_LIGHTING);
+    mat(.80f,.77f,.72f,.22f,.22f,.20f,12.f);
+    glBegin(GL_QUADS); glNormal3f(0,1,0);
+    glTexCoord2f(0,0); glVertex3f(-20,.02f,14);
+    glTexCoord2f(8,0); glVertex3f( 20,.02f,14);
+    glTexCoord2f(8,2); glVertex3f( 20,.02f,18);
+    glTexCoord2f(0,2); glVertex3f(-20,.02f,18);
     glEnd();
+    glDisable(GL_TEXTURE_2D);
+
     if(lightMode!=LM_OFF) glEnable(GL_LIGHTING);
 }
 
@@ -1064,7 +1307,9 @@ void mouseMove(int x,int y){
 int main(int argc,char** argv)
 {
     glutInit(&argc,argv);
-    glutInitDisplayMode(GLUT_DOUBLE|GLUT_RGB|GLUT_DEPTH);
+    // GLUT_MULTISAMPLE requests hardware MSAA (multi-sample anti-aliasing)
+    // — smooths polygon edges without any per-pixel cost at render time.
+    glutInitDisplayMode(GLUT_DOUBLE|GLUT_RGB|GLUT_DEPTH|GLUT_MULTISAMPLE);
     glutInitWindowSize(WIN_W,WIN_H);
     glutInitWindowPosition(50,30);
     glutCreateWindow("Car Park Scene — OpenGL All-Weeks Demo");
@@ -1072,11 +1317,19 @@ int main(int argc,char** argv)
     glClearColor(.5f,.75f,.97f,1);
     glEnable(GL_DEPTH_TEST);
     glShadeModel(GL_SMOOTH);
+    // MSAA: enable hardware multi-sample anti-aliasing
+    glEnable(GL_MULTISAMPLE);
+    // Line smoothing for wire overlays (selection ring, HUD lines)
+    glEnable(GL_LINE_SMOOTH);
+    glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
     // Use explicit glMaterial calls instead of GL_COLOR_MATERIAL
     // (GL_COLOR_MATERIAL was causing glColor calls to override
     //  material settings and produced incorrect object colours)
     // glEnable(GL_COLOR_MATERIAL);
     // glColorMaterial(GL_FRONT_AND_BACK,GL_AMBIENT_AND_DIFFUSE);
+
+    // Build procedural textures (asphalt, concrete, grass)
+    initTextures();
 
     glutDisplayFunc(display);
     glutReshapeFunc(reshape);
