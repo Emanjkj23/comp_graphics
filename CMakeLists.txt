@@ -7,7 +7,8 @@ set(CMAKE_CXX_STANDARD 11)
 include_directories(C:/Users/collet.mutangiri1/AppData/Local/msys64/mingw64/include)
 link_directories(C:/Users/collet.mutangiri1/AppData/Local/msys64/mingw64/lib)
 
-add_executable(app ./src/main.cpp)
+add_executable(app ./src/main.cpp
+    hcs411_exam/R223912V/R223912V_5.cpp)
 
 target_link_libraries(app
     freeglut
